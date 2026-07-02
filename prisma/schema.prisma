@@ -1,0 +1,140 @@
+// ============================================================
+// VetLoop — Hybrid B2C/B2B Veterinary Platform
+// Tech Stack : PostgreSQL + Prisma ORM
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  PET_OWNER
+  FARM_OWNER
+  VETERINARIAN
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum AppointmentType {
+  ONLINE_TELEHEALTH
+  PHYSICAL_VISIT
+}
+
+// ─────────────────────────────────────────────
+// USER MODEL
+// ─────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  role         UserRole
+
+  // Relations
+  pets                Pet[]
+  farms               Farm[]
+  appointmentsAsClient Appointment[] @relation("ClientAppointments")
+  appointmentsAsVet    Appointment[] @relation("VetAppointments")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// PET MODEL  (B2C)
+// ─────────────────────────────────────────────
+
+model Pet {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  species     String    // e.g. Dog, Cat, Bird, Rabbit …
+  breed       String?
+  weight      Float?
+  dateOfBirth DateTime?
+
+  // Owner relation
+  ownerId String @db.Uuid
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Back-reference from appointments
+  appointments Appointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("pets")
+}
+
+// ─────────────────────────────────────────────
+// FARM MODEL  (B2B)
+// ─────────────────────────────────────────────
+
+model Farm {
+  id            String @id @default(uuid()) @db.Uuid
+  farmName      String
+  livestockType String // e.g. Cattle, Sheep, Equine, Poultry …
+  totalCount    Int
+
+  // Owner relation
+  ownerId String @db.Uuid
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Back-reference from appointments
+  appointments Appointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("farms")
+}
+
+// ─────────────────────────────────────────────
+// APPOINTMENT MODEL
+// ─────────────────────────────────────────────
+
+model Appointment {
+  id       String            @id @default(uuid()) @db.Uuid
+  date     DateTime
+  status   AppointmentStatus @default(PENDING)
+  type     AppointmentType
+  symptoms String?           // Optional — used for AI triage notes
+
+  // Client (pet owner / farm owner)
+  clientId String @db.Uuid
+  client   User   @relation("ClientAppointments", fields: [clientId], references: [id], onDelete: Restrict)
+
+  // Veterinarian
+  vetId String @db.Uuid
+  vet   User   @relation("VetAppointments", fields: [vetId], references: [id], onDelete: Restrict)
+
+  // Optional: linked pet (B2C flow)
+  petId String? @db.Uuid
+  pet   Pet?    @relation(fields: [petId], references: [id], onDelete: SetNull)
+
+  // Optional: linked farm (B2B flow)
+  farmId String? @db.Uuid
+  farm   Farm?   @relation(fields: [farmId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("appointments")
+}

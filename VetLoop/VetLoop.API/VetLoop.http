@@ -1,0 +1,136 @@
+### ============================================================
+###  VetLoop.API — HTTP Test Suite
+###  IDE: VS Code REST Client / JetBrains HTTP Client / Rider
+###
+###  USAGE:
+###    1. Start the API:  dotnet run --project VetLoop.API
+###    2. Run "Register" first to create the test user
+###    3. Run "Login" and copy the returned token
+###    4. Paste the token into @authToken below
+###    5. Run the protected-route tests
+### ============================================================
+
+@host    = http://localhost:5166
+@apiBase = {{host}}/api
+
+# ── After a successful /login, paste the returned JWT here ────────────────────
+@authToken = PASTE_JWT_HERE
+
+
+# ==============================================================================
+#  1. REGISTER — Create a new FarmOwner account
+#     Expected: 201 Created  +  AuthResponseDto JSON
+#     Note: Will return 409 Conflict if the email already exists.
+# ==============================================================================
+
+POST {{apiBase}}/auth/register
+Content-Type: application/json
+
+{
+  "fullName":    "Admin Test Farm",
+  "email":       "admin@testfarm.com",
+  "password":    "Password123!",
+  "phoneNumber": "+905551234567",
+  "role":        1
+}
+
+###
+
+
+# ==============================================================================
+#  2. LOGIN — Authenticate and retrieve a fresh JWT
+#     Expected: 200 OK  +  AuthResponseDto JSON
+#     Copy the "token" value from the response → paste into @authToken above
+# ==============================================================================
+
+POST {{apiBase}}/auth/login
+Content-Type: application/json
+
+{
+  "email":    "admin@testfarm.com",
+  "password": "Password123!"
+}
+
+###
+
+
+# ==============================================================================
+#  3. LOGIN — Wrong password (negative test)
+#     Expected: 401 Unauthorized  +  { "error": "Invalid email or password." }
+# ==============================================================================
+
+POST {{apiBase}}/auth/login
+Content-Type: application/json
+
+{
+  "email":    "admin@testfarm.com",
+  "password": "WrongPassword!"
+}
+
+###
+
+
+# ==============================================================================
+#  4. REGISTER — Attempt Admin self-registration (blocked)
+#     Expected: 400 Bad Request  +  { "error": "Admin accounts cannot be self-registered." }
+#     UserRole enum: Admin = 0, FarmOwner = 1, Veterinarian = 2, FarmWorker = 3
+# ==============================================================================
+
+POST {{apiBase}}/auth/register
+Content-Type: application/json
+
+{
+  "fullName":    "Hacker Admin",
+  "email":       "hacker@evil.com",
+  "password":    "Password123!",
+  "phoneNumber": null,
+  "role":        0
+}
+
+###
+
+
+# ==============================================================================
+#  5. GET FARMS — Protected endpoint (requires valid JWT)
+#     Paste the login token into @authToken at the top, then run this.
+#     Expected: 200 OK  +  array of Farm objects
+#     Without token → 401 Unauthorized
+# ==============================================================================
+
+GET {{apiBase}}/farms
+Authorization: Bearer {{authToken}}
+Accept: application/json
+
+###
+
+
+# ==============================================================================
+#  6. GET PETS — Protected endpoint (requires valid JWT)
+#     Expected: 200 OK  +  array of Pet objects
+# ==============================================================================
+
+GET {{apiBase}}/pets
+Authorization: Bearer {{authToken}}
+Accept: application/json
+
+###
+
+
+# ==============================================================================
+#  7. DUPLICATE REGISTER — Same email (conflict test)
+#     Expected: 409 Conflict  +  { "error": "An account with email '...' already exists." }
+#     (Run AFTER step 1 has succeeded)
+# ==============================================================================
+
+POST {{apiBase}}/auth/register
+Content-Type: application/json
+
+{
+  "fullName":    "Duplicate User",
+  "email":       "admin@testfarm.com",
+  "password":    "Password123!",
+  "phoneNumber": null,
+  "role":        1
+}
+
+###
