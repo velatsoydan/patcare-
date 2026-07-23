@@ -12,7 +12,7 @@
  * Stack: React 18 · TypeScript · Tailwind CSS v4 · Lucide React
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Mail,
   Lock,
@@ -59,6 +59,13 @@ import {
   Hash,
 } from "lucide-react";
 import MonitoringHub from "./MonitoringHub";
+import ModernDashboard from "./ModernDashboard";
+import { OAuthButtons } from "./OAuthButtons";
+import { login as apiLogin, register as apiRegister } from "../../services/authService";
+import { getMyPets } from "../../services/petService";
+import { useAuthStore } from "../../store/authStore";
+import { useSessionRestore } from "../../hooks/useSessionRestore";
+import type { PetResponse } from "../../types/api";
 
 // ─── Types & Constants ─────────────────────────────────────────
 
@@ -67,6 +74,7 @@ type AppScreen =
   | "auth"
   | "admin-login"
   | "admin-dashboard"
+  | "dashboard"
   | "ai-diagnostic"
   | "iot-dashboard"
   | "settings";
@@ -182,21 +190,50 @@ function AuthScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      setError("Please enter your email and password.");
+      setError("Lütfen e-posta ve şifrenizi giriniz.");
       return;
     }
     setError("");
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    const demo = DEMO_CREDENTIALS[selectedRole];
-    onLogin({ name: demo.name, email, role: selectedRole, avatar: demo.avatar });
-    setIsLoading(false);
+    try {
+      if (activeTab === "signin") {
+        const res = await apiLogin({ email, password });
+        onLogin({
+          name: res.fullName,
+          email: res.email,
+          role: res.role === "Veterinarian" ? "veterinarian" : res.role === "FarmOwner" ? "farm-owner" : "pet-owner",
+          avatar: res.fullName.charAt(0),
+        });
+      } else {
+        const roleMap: Record<UserRole, any> = {
+          "pet-owner": "PetOwner",
+          "farm-owner": "FarmOwner",
+          veterinarian: "Veterinarian",
+        };
+        const res = await apiRegister({
+          fullName: email.split("@")[0],
+          email,
+          password,
+          role: roleMap[selectedRole],
+        });
+        onLogin({
+          name: res.fullName,
+          email: res.email,
+          role: res.role === "Veterinarian" ? "veterinarian" : res.role === "FarmOwner" ? "farm-owner" : "pet-owner",
+          avatar: res.fullName.charAt(0),
+        });
+      }
+    } catch (err: any) {
+      setError(err.message || "Giriş işlemi başarısız. Lütfen bilgilerinizi kontrol edin.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleDemoFill = () => {
     const demo = DEMO_CREDENTIALS[selectedRole];
     setEmail(demo.email);
-    setPassword("demo1234");
+    setPassword("VetLoop2026!");
     setError("");
   };
 
@@ -234,7 +271,7 @@ function AuthScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
                     : "text-slate-400 hover:text-white"
                 }`}
               >
-                {tab === "signin" ? "Sign In" : "Create Account"}
+                {tab === "signin" ? "Giriş Yap" : "Hesap Oluştur"}
               </button>
             ))}
           </div>
@@ -242,7 +279,7 @@ function AuthScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
           {/* Role selector */}
           <div className="mb-5">
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
-              I am a…
+              Kullanıcı Rolü
             </label>
             <div className="grid grid-cols-3 gap-2">
               {roleKeys.map((role) => {
@@ -276,7 +313,7 @@ function AuthScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email address"
+                placeholder="E-posta Adresi"
                 className="w-full bg-slate-800/60 border border-slate-700/60 rounded-xl pl-10 pr-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-all"
               />
             </div>
@@ -286,7 +323,7 @@ function AuthScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
+                placeholder="Şifre"
                 className="w-full bg-slate-800/60 border border-slate-700/60 rounded-xl pl-10 pr-10 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-all"
                 onKeyDown={(e) => e.key === "Enter" && handleLogin()}
               />
@@ -320,24 +357,46 @@ function AuthScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
             `}
           >
             {isLoading ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Authenticating…</>
+              <><Loader2 className="w-4 h-4 animate-spin" /> Doğrulanıyor…</>
             ) : (
-              <>{activeTab === "signin" ? "Sign In" : "Create Account"} <ArrowRight className="w-4 h-4" /></>
+              <>{activeTab === "signin" ? "Giriş Yap" : "Hesap Oluştur"} <ArrowRight className="w-4 h-4" /></>
             )}
           </button>
 
-          {/* Demo shortcut */}
+          {/* OAuth Buttons Section */}
+          <div className="relative my-5 flex items-center justify-center">
+            <div className="border-t border-slate-800 w-full" />
+            <span className="bg-slate-900 px-3 text-[10px] uppercase tracking-wider text-slate-500 font-semibold absolute">
+              Veya OAuth ile Devam Et
+            </span>
+          </div>
+
+          <OAuthButtons
+            onSuccess={() => {
+              const authUser = useAuthStore.getState().user;
+              if (authUser) {
+                onLogin({
+                  name: authUser.fullName,
+                  email: authUser.email,
+                  role: authUser.role === "Veterinarian" ? "veterinarian" : authUser.role === "FarmOwner" ? "farm-owner" : "pet-owner",
+                  avatar: authUser.fullName.charAt(0),
+                });
+              }
+            }}
+            onError={(err) => setError(err)}
+          />
+
+          {/* Demo Fill Button */}
           <button
             onClick={handleDemoFill}
-            className="w-full mt-3 py-2.5 rounded-xl text-xs text-slate-500 hover:text-slate-300 border border-slate-800 hover:border-slate-700 transition-all"
+            className="w-full mt-4 py-2.5 rounded-xl text-xs text-slate-500 hover:text-slate-300 border border-slate-800 hover:border-slate-700 transition-all"
           >
-            <span className="text-emerald-500">✦</span> Fill demo credentials for{" "}
-            <span className="text-emerald-400 font-semibold">{ROLE_CONFIG[selectedRole].label}</span>
+            <span className="text-emerald-500">✦</span> Seed hesabı doldur ({ROLE_CONFIG[selectedRole].label})
           </button>
         </div>
 
         <p className="text-center text-[11px] text-slate-700 mt-4">
-          By continuing, you agree to VetLoop's Terms of Service and Privacy Policy.
+          Devam ederek VetLoop Hizmet Şartları ve Gizlilik Politikasını kabul etmiş olursunuz.
         </p>
       </div>
     </div>
@@ -858,24 +917,100 @@ function SettingsScreen({
   user: AuthUser;
   onLogout: () => void;
 }) {
-  const [notifAppointments, setNotifAppointments] = useState(true);
-  const [notifIoTAlerts, setNotifIoTAlerts] = useState(true);
-  const [notifPayments, setNotifPayments] = useState(true);
-  const [notifAIUpdates, setNotifAIUpdates] = useState(false);
+  // Notifications state with localStorage persistence
+  const [notifAppointments, setNotifAppointments] = useState(() => {
+    return localStorage.getItem("vetloop_notif_appts") !== "false";
+  });
+  const [notifIoTAlerts, setNotifIoTAlerts] = useState(() => {
+    return localStorage.getItem("vetloop_notif_iot") !== "false";
+  });
+  const [notifPayments, setNotifPayments] = useState(() => {
+    return localStorage.getItem("vetloop_notif_pay") !== "false";
+  });
+  const [notifAIUpdates, setNotifAIUpdates] = useState(() => {
+    return localStorage.getItem("vetloop_notif_ai") === "true";
+  });
+
   const [logoutConfirm, setLogoutConfirm] = useState(false);
 
-  const roleCfg = ROLE_CONFIG[user.role];
+  // Real backend pets data for IoT Devices
+  const [realPets, setRealPets] = useState<PetResponse[]>([]);
+  const [isLoadingPets, setIsLoadingPets] = useState(true);
 
-  const linkedDevices = [
-    { id: "d-001", label: "Smart Collar #A-42", subject: "Tarçın", online: true },
-    { id: "d-002", label: "Farm Sensor #B-07", subject: "Cattle #842", online: true },
-    { id: "d-003", label: "Smart Collar #A-19", subject: "Luna", online: false },
-  ];
+  // Payment methods state with localStorage persistence
+  const [paymentMethods, setPaymentMethods] = useState<{ id: string; label: string; default: boolean; cardHolder?: string }[]>(() => {
+    const saved = localStorage.getItem("vetloop_payment_methods");
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch {}
+    }
+    return [
+      { id: "pm-1", label: "Visa ending in 4242", default: true, cardHolder: user.name },
+      { id: "pm-2", label: "Mastercard ending in 8811", default: false, cardHolder: user.name },
+    ];
+  });
 
-  const paymentMethods = [
-    { id: "pm-1", label: "Visa ending in 4242", default: true },
-    { id: "pm-2", label: "Mastercard ending in 8811", default: false },
-  ];
+  const [showAddCardModal, setShowAddCardModal] = useState(false);
+  const [newCardNumber, setNewCardNumber] = useState("");
+  const [newCardName, setNewCardName] = useState("");
+
+  const roleCfg = ROLE_CONFIG[user.role] || ROLE_CONFIG["pet-owner"];
+
+  // Fetch real pets from .NET Web API /api/pets
+  useEffect(() => {
+    getMyPets()
+      .then((petsData) => {
+        setRealPets(petsData);
+      })
+      .catch((err) => {
+        console.error("Settings: Failed to fetch user pets", err);
+      })
+      .finally(() => setIsLoadingPets(false));
+  }, []);
+
+  const handleToggleNotif = (key: string, setter: (v: boolean) => void, curr: boolean) => {
+    const next = !curr;
+    setter(next);
+    localStorage.setItem(key, String(next));
+  };
+
+  const handleAddCard = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCardNumber.trim()) return;
+    const cleanNum = newCardNumber.replace(/\s/g, "");
+    const last4 = cleanNum.slice(-4) || "9999";
+    const brand = cleanNum.startsWith("5") ? "Mastercard" : "Visa";
+    const newCard = {
+      id: `pm-${Date.now()}`,
+      label: `${brand} ending in ${last4}`,
+      default: paymentMethods.length === 0,
+      cardHolder: newCardName.trim() || user.name,
+    };
+    const updated = [...paymentMethods, newCard];
+    setPaymentMethods(updated);
+    localStorage.setItem("vetloop_payment_methods", JSON.stringify(updated));
+    setShowAddCardModal(false);
+    setNewCardNumber("");
+    setNewCardName("");
+  };
+
+  const handleSetDefaultCard = (id: string) => {
+    const updated = paymentMethods.map((pm) => ({
+      ...pm,
+      default: pm.id === id,
+    }));
+    setPaymentMethods(updated);
+    localStorage.setItem("vetloop_payment_methods", JSON.stringify(updated));
+  };
+
+  // Convert real pets into IoT collar device representation
+  const iotCollars = realPets.map((p) => ({
+    id: p.id,
+    label: p.iotCollarMacAddress ? `Smart Collar (${p.iotCollarMacAddress})` : `Smart Collar (${p.species})`,
+    subject: `${p.name} · ${p.breed}`,
+    online: true,
+  }));
 
   return (
     <div className="flex-1 overflow-y-auto bg-slate-900 text-white">
@@ -885,7 +1020,10 @@ function SettingsScreen({
           <div className="p-2 bg-slate-800 rounded-lg border border-slate-700">
             <Settings className="w-5 h-5 text-slate-400" />
           </div>
-          <h1 className="text-base font-bold text-white">Settings</h1>
+          <div>
+            <h1 className="text-base font-bold text-white">Settings & Preferences</h1>
+            <p className="text-xs text-slate-500">Live .NET API Sync & Device Management</p>
+          </div>
         </div>
       </header>
 
@@ -926,84 +1064,89 @@ function SettingsScreen({
             <h2 className="text-sm font-bold text-white">Notification Preferences</h2>
           </div>
           <p className="text-[11px] text-slate-600 mb-3">
-            Control what alerts reach you
+            Control alert and notification thresholds (Persisted in session)
           </p>
           <div className="divide-y divide-slate-800">
             <ToggleRow
               label="Appointment Reminders"
               sublabel="24h and 1h before each booking"
               checked={notifAppointments}
-              onChange={setNotifAppointments}
+              onChange={() => handleToggleNotif("vetloop_notif_appts", setNotifAppointments, notifAppointments)}
             />
             <ToggleRow
               label="IoT Critical Alerts"
               sublabel="Sensor anomalies above threshold"
               checked={notifIoTAlerts}
-              onChange={setNotifIoTAlerts}
+              onChange={() => handleToggleNotif("vetloop_notif_iot", setNotifIoTAlerts, notifIoTAlerts)}
             />
             <ToggleRow
               label="Payment & Invoice Updates"
               sublabel="New invoices and payment receipts"
               checked={notifPayments}
-              onChange={setNotifPayments}
+              onChange={() => handleToggleNotif("vetloop_notif_pay", setNotifPayments, notifPayments)}
             />
             <ToggleRow
               label="AI Diagnostic Insights"
               sublabel="Weekly health summary from VetLoop AI"
               checked={notifAIUpdates}
-              onChange={setNotifAIUpdates}
+              onChange={() => handleToggleNotif("vetloop_notif_ai", setNotifAIUpdates, notifAIUpdates)}
             />
           </div>
         </div>
 
-        {/* Linked IoT Devices */}
+        {/* Linked IoT Devices (Real Backend Data from /api/pets) */}
         <div className="rounded-2xl bg-slate-800/30 border border-slate-700/50 p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2.5">
               <Cpu className="w-4 h-4 text-emerald-400" />
-              <h2 className="text-sm font-bold text-white">Linked IoT Devices</h2>
+              <div>
+                <h2 className="text-sm font-bold text-white">Linked IoT Devices</h2>
+                <p className="text-[10px] text-slate-500">Real pets & collars synced from PostgreSQL DB</p>
+              </div>
             </div>
-            <button className="flex items-center gap-1.5 text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold px-2.5 py-1.5 bg-emerald-500/10 rounded-lg border border-emerald-500/20 hover:border-emerald-500/40 transition-all">
-              <Plus className="w-3 h-3" />
-              Add Device
-            </button>
           </div>
           <div className="space-y-2.5">
-            {linkedDevices.map((device) => (
-              <div
-                key={device.id}
-                className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/60 border border-slate-700/40"
-              >
-                <div
-                  className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    device.online ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" : "bg-slate-600"
-                  }`}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-200 truncate">{device.label}</p>
-                  <p className="text-[11px] text-slate-600">{device.subject}</p>
-                </div>
-                <span
-                  className={`text-[10px] font-mono ${
-                    device.online ? "text-emerald-400" : "text-slate-600"
-                  }`}
-                >
-                  {device.online ? "LIVE" : "OFFLINE"}
-                </span>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+            {isLoadingPets ? (
+              <div className="p-4 text-center text-xs text-slate-500">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400 inline mr-2" />
+                IoT cihaz verileri yükleniyor...
               </div>
-            ))}
+            ) : iotCollars.length > 0 ? (
+              iotCollars.map((device) => (
+                <div
+                  key={device.id}
+                  className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/60 border border-slate-700/40"
+                >
+                  <div className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-slate-200 truncate">{device.label}</p>
+                    <p className="text-[11px] text-slate-500 font-mono">{device.subject}</p>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    ONLINE
+                  </span>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+                </div>
+              ))
+            ) : (
+              <div className="p-4 text-center text-xs text-slate-500 bg-slate-800/40 rounded-xl border border-slate-700/40">
+                Kayıtlı evcil hayvan veya IoT tasma bulunamadı.
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Payment Methods */}
+        {/* Payment Methods (Dynamic Storage Enriched) */}
         <div className="rounded-2xl bg-slate-800/30 border border-slate-700/50 p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2.5">
               <CreditCard className="w-4 h-4 text-sky-400" />
               <h2 className="text-sm font-bold text-white">Payment Methods</h2>
             </div>
-            <button className="flex items-center gap-1.5 text-[11px] text-sky-400 hover:text-sky-300 font-semibold px-2.5 py-1.5 bg-sky-500/10 rounded-lg border border-sky-500/20 hover:border-sky-500/40 transition-all">
+            <button
+              onClick={() => setShowAddCardModal(true)}
+              className="flex items-center gap-1.5 text-[11px] text-sky-400 hover:text-sky-300 font-semibold px-2.5 py-1.5 bg-sky-500/10 rounded-lg border border-sky-500/20 hover:border-sky-500/40 transition-all"
+            >
               <Plus className="w-3 h-3" />
               Add Card
             </button>
@@ -1015,16 +1158,20 @@ function SettingsScreen({
             {paymentMethods.map((pm) => (
               <div
                 key={pm.id}
-                className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                onClick={() => handleSetDefaultCard(pm.id)}
+                className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
                   pm.default
                     ? "bg-sky-500/5 border-sky-500/30"
-                    : "bg-slate-800/60 border-slate-700/40"
+                    : "bg-slate-800/60 border-slate-700/40 hover:border-slate-600"
                 }`}
               >
                 <div className="w-9 h-6 bg-gradient-to-br from-slate-600 to-slate-700 rounded border border-slate-500/40 flex items-center justify-center flex-shrink-0">
                   <CreditCard className="w-3.5 h-3.5 text-slate-300" />
                 </div>
-                <p className="flex-1 text-sm text-slate-200">{pm.label}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-slate-200">{pm.label}</p>
+                  {pm.cardHolder && <p className="text-[10px] text-slate-500">{pm.cardHolder}</p>}
+                </div>
                 {pm.default && (
                   <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
                     Default
@@ -1036,6 +1183,54 @@ function SettingsScreen({
           </div>
         </div>
 
+        {/* Modal: Add Payment Card */}
+        {showAddCardModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl">
+              <h3 className="text-sm font-bold text-white mb-3">Kart Ekle</h3>
+              <form onSubmit={handleAddCard} className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-slate-400 mb-1">Kart Üzerindeki İsim</label>
+                  <input
+                    type="text"
+                    placeholder="Ad Soyad"
+                    value={newCardName}
+                    onChange={(e) => setNewCardName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 mb-1">Kart Numarası</label>
+                  <input
+                    type="text"
+                    placeholder="**** **** **** 4242"
+                    value={newCardNumber}
+                    onChange={(e) => setNewCardNumber(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-sky-500"
+                    required
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCardModal(false)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-400 font-semibold"
+                  >
+                    İptal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold"
+                  >
+                    Kaydet
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* App Info */}
         <div className="rounded-2xl bg-slate-800/20 border border-slate-800 p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -1045,9 +1240,9 @@ function SettingsScreen({
           <div className="space-y-2">
             {[
               { label: "Version", value: "2.4.1 (Build 847)" },
-              { label: "Environment", value: "Production" },
-              { label: "AI Model", value: "VetLoop Vision v2 (GPT-4o)" },
-              { label: "Schema", value: "Prisma PostgreSQL v5" },
+              { label: "Environment", value: "Production .NET Web API" },
+              { label: "AI Model", value: "VetLoop Vision v2 (OpenAI)" },
+              { label: "Database", value: "PostgreSQL v16 (EF Core)" },
             ].map(({ label, value }) => (
               <div key={label} className="flex items-center justify-between">
                 <span className="text-xs text-slate-600">{label}</span>
@@ -1100,23 +1295,14 @@ function SettingsScreen({
 // ─── Initial Gateway Screen ─────────────────────────────────────
 
 function InitialGatewayScreen({
+  onLogin,
   onContinueEmail,
   onAdminPortal,
 }: {
+  onLogin: (user: AuthUser) => void;
   onContinueEmail: () => void;
   onAdminPortal: () => void;
 }) {
-  const [oauthLoading, setOauthLoading] = useState<"google" | "apple" | null>(null);
-
-  const handleOAuth = async (provider: "google" | "apple") => {
-    setOauthLoading(provider);
-    await new Promise((r) => setTimeout(r, 1800));
-    // Simulate successful OAuth → treat as pet-owner demo login
-    setOauthLoading(null);
-    // In a real app this would call onLogin(); for now shows a placeholder toast
-    alert(`OAuth with ${provider} simulated. Integrate SDK here.`);
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col overflow-hidden relative">
       {/* ── Ambient background layers ── */}
@@ -1158,7 +1344,7 @@ function InitialGatewayScreen({
         <p className="text-slate-500 text-sm mb-1">
           Veterinary Intelligence Platform
         </p>
-        <div className="flex items-center gap-2 mb-12">
+        <div className="flex items-center gap-2 mb-10">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           <span className="text-[11px] text-slate-600 font-mono">
             B2C · B2B · AI-Powered · IoT-Connected
@@ -1166,56 +1352,32 @@ function InitialGatewayScreen({
           <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
         </div>
 
-        {/* ── OAuth Buttons ── */}
-        <div className="w-full max-w-sm space-y-3">
-          {/* Google */}
-          <button
-            onClick={() => handleOAuth("google")}
-            disabled={oauthLoading !== null}
-            className="w-full h-13 bg-white hover:bg-gray-50 text-gray-800 font-semibold text-sm rounded-2xl flex items-center justify-center gap-3 transition-all duration-200 shadow-[0_4px_20px_rgba(0,0,0,0.4)] hover:shadow-[0_4px_28px_rgba(0,0,0,0.5)] active:scale-[0.98] disabled:opacity-60"
-          >
-            {oauthLoading === "google" ? (
-              <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
-            ) : (
-              /* Google G icon (SVG inline — no external dep) */
-              <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden>
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-              </svg>
-            )}
-            {oauthLoading === "google" ? "Connecting…" : "Continue with Google"}
-          </button>
-
-          {/* Apple */}
-          <button
-            onClick={() => handleOAuth("apple")}
-            disabled={oauthLoading !== null}
-            className="w-full h-13 bg-black hover:bg-zinc-900 text-white font-semibold text-sm rounded-2xl flex items-center justify-center gap-3 transition-all duration-200 border border-white/10 hover:border-white/20 shadow-[0_4px_20px_rgba(0,0,0,0.5)] active:scale-[0.98] disabled:opacity-60"
-          >
-            {oauthLoading === "apple" ? (
-              <Loader2 className="w-5 h-5 animate-spin text-white/70" />
-            ) : (
-              /* Apple  icon */
-              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white" aria-hidden>
-                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
-              </svg>
-            )}
-            {oauthLoading === "apple" ? "Connecting…" : "Continue with Apple"}
-          </button>
+        {/* ── Gerçek OAuth Buttons SDK ── */}
+        <div className="w-full max-w-sm space-y-4">
+          <OAuthButtons
+            onSuccess={() => {
+              const authUser = useAuthStore.getState().user;
+              if (authUser) {
+                onLogin({
+                  name: authUser.fullName,
+                  email: authUser.email,
+                  role: authUser.role === "Veterinarian" ? "veterinarian" : authUser.role === "FarmOwner" ? "farm-owner" : "pet-owner",
+                  avatar: authUser.fullName.charAt(0),
+                });
+              }
+            }}
+          />
 
           {/* Divider */}
           <div className="flex items-center gap-3 py-1">
             <div className="flex-1 h-px bg-slate-800" />
-            <span className="text-[11px] text-slate-600 font-mono">OR</span>
+            <span className="text-[11px] text-slate-600 font-mono">VEYA</span>
             <div className="flex-1 h-px bg-slate-800" />
           </div>
 
           {/* Continue with Email */}
           <button
             onClick={onContinueEmail}
-            disabled={oauthLoading !== null}
             className="w-full h-13 bg-slate-800/60 hover:bg-slate-700/60 text-slate-200 font-semibold text-sm rounded-2xl flex items-center justify-center gap-3 transition-all duration-200 border border-slate-700/60 hover:border-slate-600 active:scale-[0.98] disabled:opacity-50"
           >
             <Mail className="w-4.5 h-4.5 text-slate-400" />
@@ -1588,16 +1750,28 @@ function AdminLoginScreen({
 // ─── Main App Shell ─────────────────────────────────────────────
 
 export default function AppShell() {
+  useSessionRestore();
+
   const [screen, setScreen] = useState<AppScreen>("gateway");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
 
+  const storeUser = useAuthStore((s) => s.user);
+
+  const currentUser: AuthUser | null = user ?? (storeUser ? {
+    name: storeUser.fullName,
+    email: storeUser.email,
+    role: storeUser.role === "Veterinarian" ? "veterinarian" : storeUser.role === "FarmOwner" ? "farm-owner" : "pet-owner",
+    avatar: storeUser.fullName.charAt(0),
+  } : null);
+
   const handleLogin = (u: AuthUser) => {
     setUser(u);
-    setScreen("ai-diagnostic");
+    setScreen("dashboard");
   };
 
   const handleLogout = () => {
+    useAuthStore.getState().logout();
     setUser(null);
     setScreen("gateway");
   };
@@ -1616,6 +1790,7 @@ export default function AppShell() {
   if (screen === "gateway") {
     return (
       <InitialGatewayScreen
+        onLogin={handleLogin}
         onContinueEmail={() => setScreen("auth")}
         onAdminPortal={() => setScreen("admin-login")}
       />
@@ -1646,8 +1821,9 @@ export default function AppShell() {
     label: string;
     color: string;
   }[] = [
+    { id: "dashboard", icon: Activity, label: "Dashboard", color: "text-emerald-400" },
     { id: "ai-diagnostic", icon: BrainCircuit, label: "AI Diagnosis", color: "text-violet-400" },
-    { id: "iot-dashboard", icon: Radio, label: "IoT Monitor", color: "text-emerald-400" },
+    { id: "iot-dashboard", icon: Radio, label: "IoT Monitor", color: "text-sky-400" },
     { id: "settings", icon: Settings, label: "Settings", color: "text-slate-400" },
   ];
 
@@ -1697,17 +1873,18 @@ export default function AppShell() {
             onClick={() => setScreen("settings")}
             className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-[11px] font-black text-white shadow-[0_2px_12px_rgba(16,185,129,0.25)] hover:shadow-[0_2px_20px_rgba(16,185,129,0.4)] transition-all"
           >
-            {user?.avatar ?? "?"}
+            {currentUser?.avatar ?? "?"}
           </button>
         </div>
       </aside>
 
       {/* Content area */}
       <main className="flex-1 flex overflow-hidden">
-        {screen === "ai-diagnostic" && user && <AIDiagnosticScreen user={user} />}
+        {screen === "dashboard" && <ModernDashboard />}
+        {screen === "ai-diagnostic" && currentUser && <AIDiagnosticScreen user={currentUser} />}
         {screen === "iot-dashboard" && <MonitoringHub />}
-        {screen === "settings" && user && (
-          <SettingsScreen user={user} onLogout={handleLogout} />
+        {screen === "settings" && currentUser && (
+          <SettingsScreen user={currentUser} onLogout={handleLogout} />
         )}
       </main>
     </div>

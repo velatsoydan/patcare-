@@ -41,4 +41,7 @@ public sealed class VetProfile : BaseEntity
 
     // ── Navigation Property ────────────────────────────────────────────────────
     public User User { get; set; } = null!;
+
+    /// <summary>All appointments assigned to this veterinarian.</summary>
+    public ICollection<Appointment> Appointments { get; set; } = [];
 }

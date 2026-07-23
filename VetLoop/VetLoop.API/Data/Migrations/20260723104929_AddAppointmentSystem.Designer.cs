@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using VetLoop.API.Data;
@@ -11,9 +12,11 @@ using VetLoop.API.Data;
 namespace VetLoop.API.Data.Migrations
 {
     [DbContext(typeof(VetLoopDbContext))]
-    partial class VetLoopDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260723104929_AddAppointmentSystem")]
+    partial class AddAppointmentSystem
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

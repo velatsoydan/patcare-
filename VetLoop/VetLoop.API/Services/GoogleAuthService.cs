@@ -35,20 +35,24 @@ public sealed class GoogleAuthService : IGoogleAuthService
         string            idToken,
         CancellationToken ct = default)
     {
-        // ── Resolve the expected audience (our Web Client ID) ──────────────
-        var clientId = _config["Google:ClientId"];
-        if (string.IsNullOrWhiteSpace(clientId))
+        // ── Resolve the expected audience (our Web / Mobile Client IDs) ───
+        var clientIdSetting = _config["Google:ClientId"];
+        if (string.IsNullOrWhiteSpace(clientIdSetting))
             throw new InvalidOperationException(
                 "Google:ClientId is not configured. " +
                 "Add it to appsettings.Development.json or set the " +
                 "GOOGLE__CLIENTID environment variable.");
+
+        var clientIds = clientIdSetting
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
 
         // ── Server-side validation via Google's public RSA keys ────────────
         //    ValidateAsync fetches & caches Google's JWKS automatically.
         //    Throws InvalidJwtException on any validation failure.
         var settings = new GoogleJsonWebSignature.ValidationSettings
         {
-            Audience = [clientId],   // C# 12 collection expression
+            Audience = clientIds,
         };
 
         GoogleJsonWebSignature.Payload payload;

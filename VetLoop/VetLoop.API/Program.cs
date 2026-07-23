@@ -1,9 +1,13 @@
 using System.Text;
+using FluentValidation;
+using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using VetLoop.API.Data;
+using VetLoop.API.Data.Seed;
+using VetLoop.API.Middleware;
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  VetLoop.API  |  .NET 9 Minimal Hosting
@@ -95,21 +99,34 @@ builder.Services.AddScoped<VetLoop.API.Services.IGoogleAuthService,
 builder.Services.AddScoped<VetLoop.API.Services.IAiService,
                             VetLoop.API.Services.OpenAiService>();
 
-// ── 4. Controllers ─────────────────────────────────────────────────────────
+// ── 4. Controllers + FluentValidation ─────────────────────────────────────
 builder.Services.AddControllers();
+
+// Scans the assembly for all AbstractValidator<T> implementations
+// and registers them as scoped services automatically.
+builder.Services.AddValidatorsFromAssemblyContaining<Program>();
+builder.Services.AddFluentValidationAutoValidation(); // triggers on [FromBody] model binding
+
+// ── 5. DataSeeder (Development only) ───────────────────────────────
+builder.Services.AddScoped<DataSeeder>();
 
 // ── 4. OpenAPI (native .NET 9) + Scalar UI ────────────────────────────────
 builder.Services.AddOpenApi();
 
 // ── 5. CORS ────────────────────────────────────────────────────────────────
-//  Dev: allow all origins (Expo/Vite dev servers).
-//  Production: restrict via environment-specific appsettings.
+//  Dev: Allow Vite (localhost:5173), React Native/Expo, and localhost origins with credentials support.
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("DevPolicy", policy =>
-        policy.AllowAnyOrigin()
+        policy.WithOrigins(
+                  "http://localhost:5173",
+                  "https://localhost:5173",
+                  "http://localhost:3000",
+                  "http://localhost:5174",
+                  "http://127.0.0.1:5173")
               .AllowAnyMethod()
-              .AllowAnyHeader());
+              .AllowAnyHeader()
+              .AllowCredentials());
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -117,6 +134,13 @@ builder.Services.AddCors(options =>
 // ══════════════════════════════════════════════════════════════════════════════
 
 var app = builder.Build();
+
+// ── Global Exception Handler ────────────────────────────────────────────
+// MUST be first in the pipeline so it can catch exceptions from all subsequent middleware.
+app.UseMiddleware<GlobalExceptionHandlerMiddleware>();
+
+// CORS MUST be applied early in the pipeline
+app.UseCors("DevPolicy");
 
 if (app.Environment.IsDevelopment())
 {
@@ -130,14 +154,25 @@ if (app.Environment.IsDevelopment())
         options.Theme       = ScalarTheme.DeepSpace;
     });
 }
-
-app.UseHttpsRedirection();
-app.UseCors("DevPolicy");
+else
+{
+    app.UseHttpsRedirection();
+}
 
 // IMPORTANT: Authentication MUST be registered before Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// ── Database Seed (Development + boş veritabanı) ───────────────────────────
+// app.Run()'dan önce çalışır — bir scope açılır, seeder inject edilir ve çalıştırılır.
+// Production'da bu blok hiç girilmez (IsDevelopment filtresi).
+if (app.Environment.IsDevelopment())
+{
+    using var seedScope  = app.Services.CreateScope();
+    var       seeder     = seedScope.ServiceProvider.GetRequiredService<DataSeeder>();
+    await seeder.SeedAsync();
+}
 
 app.Run();

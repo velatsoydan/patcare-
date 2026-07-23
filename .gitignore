@@ -1,2 +1,10 @@
 node_modules/
 dist/
+.expo/
+.env.local
+bin/
+obj/
+*.user
+*.suo
+ VetLoop/VetLoop.API/bin/
+ VetLoop/VetLoop.API/obj/

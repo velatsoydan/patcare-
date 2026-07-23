@@ -37,4 +37,7 @@ public sealed class Pet : BaseEntity
 
     // ── Navigation Properties ─────────────────────────────────────────────────
     public User Owner { get; set; } = null!;
+
+    /// <summary>All veterinary appointments booked for this pet.</summary>
+    public ICollection<Appointment> Appointments { get; set; } = [];
 }

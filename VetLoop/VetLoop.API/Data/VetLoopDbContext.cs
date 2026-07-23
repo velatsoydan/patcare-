@@ -20,10 +20,11 @@ public sealed class VetLoopDbContext : DbContext
         : base(options) { }
 
     // ── DbSets ─────────────────────────────────────────────────────────────
-    public DbSet<User>       Users       { get; set; } = null!;
-    public DbSet<Pet>        Pets        { get; set; } = null!;
-    public DbSet<Farm>       Farms       { get; set; } = null!;
-    public DbSet<VetProfile> VetProfiles { get; set; } = null!;
+    public DbSet<User>        Users        { get; set; } = null!;
+    public DbSet<Pet>         Pets         { get; set; } = null!;
+    public DbSet<Farm>        Farms        { get; set; } = null!;
+    public DbSet<VetProfile>  VetProfiles  { get; set; } = null!;
+    public DbSet<Appointment> Appointments { get; set; } = null!;
 
     // ── SaveChanges intercept — auto-stamp UpdatedAt ────────────────────────
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -63,6 +64,7 @@ public sealed class VetLoopDbContext : DbContext
         modelBuilder.Entity<Pet>().HasQueryFilter(p => !p.IsDeleted);
         modelBuilder.Entity<Farm>().HasQueryFilter(f => !f.IsDeleted);
         modelBuilder.Entity<VetProfile>().HasQueryFilter(v => !v.IsDeleted);
+        modelBuilder.Entity<Appointment>().HasQueryFilter(a => !a.IsDeleted);
 
         // ════════════════════════════════════════════════════════════════════
         //  USER
@@ -365,6 +367,104 @@ public sealed class VetLoopDbContext : DbContext
                   .HasForeignKey<VetProfile>(v => v.UserId)
                   .OnDelete(DeleteBehavior.Cascade)
                   .HasConstraintName("fk_vet_profiles_user_id");
+        });
+
+        // ════════════════════════════════════════════════════════════════════
+        //  APPOINTMENT  (Scheduling Domain)
+        //
+        //  Relationships:
+        //    Pet        (1) ──── (N) Appointment  [FK: pet_id]
+        //    VetProfile (1) ──── (N) Appointment  [FK: vet_profile_id]
+        // ════════════════════════════════════════════════════════════════════
+        modelBuilder.Entity<Appointment>(entity =>
+        {
+            entity.ToTable("appointments");
+
+            // ── Base fields ────────────────────────────────────────────────
+            entity.HasKey(a => a.Id);
+
+            entity.Property(a => a.Id)
+                  .HasColumnName("id")
+                  .HasDefaultValueSql("gen_random_uuid()");
+
+            entity.Property(a => a.CreatedAt)
+                  .HasColumnName("created_at")
+                  .HasDefaultValueSql("now()")
+                  .IsRequired();
+
+            entity.Property(a => a.UpdatedAt)
+                  .HasColumnName("updated_at");
+
+            entity.Property(a => a.IsDeleted)
+                  .HasColumnName("is_deleted")
+                  .HasDefaultValue(false)
+                  .IsRequired();
+
+            // ── Foreign Keys ───────────────────────────────────────────────
+            entity.Property(a => a.PetId)
+                  .HasColumnName("pet_id")
+                  .IsRequired();
+
+            entity.Property(a => a.VetProfileId)
+                  .HasColumnName("vet_profile_id")
+                  .IsRequired();
+
+            // ── Scheduling fields ──────────────────────────────────────────
+            entity.Property(a => a.ScheduledAt)
+                  .HasColumnName("scheduled_at")
+                  .IsRequired();
+
+            entity.Property(a => a.DurationMinutes)
+                  .HasColumnName("duration_minutes")
+                  .HasDefaultValue(30)
+                  .IsRequired();
+
+            // ── Status ─────────────────────────────────────────────────────
+            entity.Property(a => a.Status)
+                  .HasColumnName("status")
+                  .HasConversion<string>()   // stored as "Pending", "Confirmed" etc.
+                  .HasMaxLength(16)
+                  .HasDefaultValue(AppointmentStatus.Pending)
+                  .IsRequired();
+
+            // Index for fast status-based queries (e.g. "all Pending for vet X")
+            entity.HasIndex(a => a.Status)
+                  .HasDatabaseName("ix_appointments_status");
+
+            // ── Clinical fields ────────────────────────────────────────────
+            entity.Property(a => a.Reason)
+                  .HasColumnName("reason")
+                  .HasMaxLength(1000);
+
+            entity.Property(a => a.VetNotes)
+                  .HasColumnName("vet_notes")
+                  .HasMaxLength(2000);
+
+            // ── Billing fields ─────────────────────────────────────────────
+            entity.Property(a => a.FinalFee)
+                  .HasColumnName("final_fee")
+                  .HasPrecision(10, 2);   // ₺99,999,999.99 max
+
+            // ── Relationship: Pet (1) ──── (N) Appointment ─────────────────
+            //  DeleteBehavior.Restrict: bir evcil hayvan silindiğinde
+            //  randevular otomatik silinmez — önce iş kuralı çalışmalı.
+            entity.HasOne(a => a.Pet)
+                  .WithMany(p => p.Appointments)
+                  .HasForeignKey(a => a.PetId)
+                  .OnDelete(DeleteBehavior.Restrict)
+                  .HasConstraintName("fk_appointments_pet_id");
+
+            // ── Relationship: VetProfile (1) ──── (N) Appointment ──────────
+            entity.HasOne(a => a.VetProfile)
+                  .WithMany(v => v.Appointments)
+                  .HasForeignKey(a => a.VetProfileId)
+                  .OnDelete(DeleteBehavior.Restrict)
+                  .HasConstraintName("fk_appointments_vet_profile_id");
+
+            // Composite index: veterinerin takvim sorgularını hızlandırır
+            // ("X veterinerinin Y tarihindeki randevuları")
+            entity.HasIndex(a => new { a.VetProfileId, a.ScheduledAt })
+                  .HasDatabaseName("ix_appointments_vet_scheduled");
         });
     }
 }
